@@ -47,10 +47,10 @@ func deleteTaskByName(db *sqlx.DB, userId int64, name string) error {
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return nil
+		return err
 	}
 	if rowsAffected != 1 {
 		return fmt.Errorf("Task %s not found", name)
 	}
-	return err
+	return nil
 }
