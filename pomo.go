@@ -69,34 +69,8 @@ func main() {
 
 	sessions := make(map[int64]*UserSession)
 
-	tickerPeriod := 1 * time.Second
-	ticker := time.NewTicker(tickerPeriod)
-	go func() {
-		for t := range ticker.C {
-			for _, v := range sessions {
-				s := v.state
-				switch s.status {
-				case pomoStarted:
-					remaining := pomoTime - t.Sub(s.started)
-					sendRemainingTime(v, remaining)
-				case breakStarted:
-					remaining := breakTime - t.Sub(s.started)
-					sendRemainingTime(v, remaining)
-				case pomoEnded:
-					spent := t.Sub(s.started)
-					if spent%reminderTime < tickerPeriod {
-						sendMessage(v.user.chatId, "Time for break?")
-					}
-				case breakEnded:
-					spent := t.Sub(s.started)
-					if spent%reminderTime < tickerPeriod {
-						sendMessage(v.user.chatId, "Time for pomo?")
-					}
-				default:
-				}
-			}
-		}
-	}()
+	go progressUpdater(sessions)
+	go pomoReminder(sessions)
 
 	for update := range updates {
 		message := update.Message
@@ -148,6 +122,44 @@ func main() {
 			sendKeyboard(chat.ID, "Unknown command", session.state.status)
 		}
 		log.Printf("Session after action %s: %+v", text, session)
+	}
+}
+
+func progressUpdater(sessions map[int64]*UserSession) {
+	for t := range time.Tick(1 * time.Second) {
+		for _, v := range sessions {
+			s := v.state
+			switch s.status {
+			case pomoStarted:
+				remaining := pomoTime - t.Sub(s.started)
+				sendRemainingTime(v, remaining)
+			case breakStarted:
+				remaining := breakTime - t.Sub(s.started)
+				sendRemainingTime(v, remaining)
+			}
+		}
+	}
+}
+
+func pomoReminder(sessions map[int64]*UserSession) {
+	tickerPeriod := 1 * time.Second
+	for t := range time.Tick(tickerPeriod) {
+		for _, v := range sessions {
+			s := v.state
+			switch s.status {
+			case pomoEnded:
+				spent := t.Sub(s.started)
+				if spent%reminderTime < tickerPeriod {
+					sendMessage(v.user.chatId, "Time for break?")
+				}
+			case breakEnded:
+				spent := t.Sub(s.started)
+				if spent%reminderTime < tickerPeriod {
+					sendMessage(v.user.chatId, "Time for pomo?")
+				}
+			default:
+			}
+		}
 	}
 }
 
