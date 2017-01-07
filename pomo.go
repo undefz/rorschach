@@ -72,9 +72,51 @@ func main() {
 	go progressUpdater(sessions)
 	go pomoReminder(sessions)
 
+	readMessages(updates, sessions, config.AllowedChatId)
+}
+
+func progressUpdater(sessions map[int64]*UserSession) {
+	for t := range time.Tick(1 * time.Second) {
+		for _, v := range sessions {
+			s := v.state
+			switch s.status {
+			case pomoStarted:
+				remaining := pomoTime - t.Sub(s.started)
+				sendRemainingTime(v, remaining)
+			case breakStarted:
+				remaining := breakTime - t.Sub(s.started)
+				sendRemainingTime(v, remaining)
+			}
+		}
+	}
+}
+
+func pomoReminder(sessions map[int64]*UserSession) {
+	tickerPeriod := 1 * time.Second
+	for t := range time.Tick(tickerPeriod) {
+		for _, v := range sessions {
+			s := v.state
+			switch s.status {
+			case pomoEnded:
+				spent := t.Sub(s.started)
+				if spent%reminderTime < tickerPeriod {
+					sendMessage(v.user.chatId, "Time for break?")
+				}
+			case breakEnded:
+				spent := t.Sub(s.started)
+				if spent%reminderTime < tickerPeriod {
+					sendMessage(v.user.chatId, "Time for pomo?")
+				}
+			default:
+			}
+		}
+	}
+}
+
+func readMessages(updates <-chan tgbotapi.Update, sessions map[int64]*UserSession, allowedChatId int64) {
 	for update := range updates {
 		message := update.Message
-		if message == nil || message.Chat.ID != config.AllowedChatId {
+		if message == nil || message.Chat.ID != allowedChatId {
 			continue
 		}
 
@@ -122,44 +164,6 @@ func main() {
 			sendKeyboard(chat.ID, "Unknown command", session.state.status)
 		}
 		log.Printf("Session after action %s: %+v", text, session)
-	}
-}
-
-func progressUpdater(sessions map[int64]*UserSession) {
-	for t := range time.Tick(1 * time.Second) {
-		for _, v := range sessions {
-			s := v.state
-			switch s.status {
-			case pomoStarted:
-				remaining := pomoTime - t.Sub(s.started)
-				sendRemainingTime(v, remaining)
-			case breakStarted:
-				remaining := breakTime - t.Sub(s.started)
-				sendRemainingTime(v, remaining)
-			}
-		}
-	}
-}
-
-func pomoReminder(sessions map[int64]*UserSession) {
-	tickerPeriod := 1 * time.Second
-	for t := range time.Tick(tickerPeriod) {
-		for _, v := range sessions {
-			s := v.state
-			switch s.status {
-			case pomoEnded:
-				spent := t.Sub(s.started)
-				if spent%reminderTime < tickerPeriod {
-					sendMessage(v.user.chatId, "Time for break?")
-				}
-			case breakEnded:
-				spent := t.Sub(s.started)
-				if spent%reminderTime < tickerPeriod {
-					sendMessage(v.user.chatId, "Time for pomo?")
-				}
-			default:
-			}
-		}
 	}
 }
 
