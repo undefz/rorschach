@@ -67,34 +67,30 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	sessions := make(map[int64]UserSession)
-	sessionChannel := make(chan UserSession)
-	go func() {
-		for status := range sessionChannel {
-			sessions[status.chatId] = status
-		}
-	}()
+	sessions := make(map[int64]*UserSession)
+
 	tickerPeriod := 1 * time.Second
 	ticker := time.NewTicker(tickerPeriod)
 	go func() {
 		for t := range ticker.C {
 			for _, v := range sessions {
-				switch v.status {
+				s := v.state
+				switch s.status {
 				case pomoStarted:
-					remaining := pomoTime - t.Sub(v.started)
+					remaining := pomoTime - t.Sub(s.started)
 					sendRemainingTime(v, remaining)
 				case breakStarted:
-					remaining := breakTime - t.Sub(v.started)
+					remaining := breakTime - t.Sub(s.started)
 					sendRemainingTime(v, remaining)
 				case pomoEnded:
-					spent := t.Sub(v.started)
+					spent := t.Sub(s.started)
 					if spent%reminderTime < tickerPeriod {
-						sendMessage(v.chatId, "Time for break?")
+						sendMessage(v.user.chatId, "Time for break?")
 					}
 				case breakEnded:
-					spent := t.Sub(v.started)
+					spent := t.Sub(s.started)
 					if spent%reminderTime < tickerPeriod {
-						sendMessage(v.chatId, "Time for pomo?")
+						sendMessage(v.user.chatId, "Time for pomo?")
 					}
 				default:
 				}
@@ -115,54 +111,71 @@ func main() {
 
 		log.Printf("[%+v-%s] %s", chat.ID, from, text)
 
-		session := sessions[chat.ID]
+		session, ok := sessions[chat.ID]
+		if !ok {
+			session = &UserSession{
+				user: User{
+					chatId: chat.ID,
+				},
+			}
+			sessions[chat.ID] = session
+		}
+		log.Printf("Session before action %s: %+v", text, session)
 		switch text {
 		case "/start":
-			switch session.status {
+			switch session.state.status {
 			case empty:
 				fallthrough
 			case breakEnded:
-				startPomo(chat.ID, sessionChannel)
+				startPomo(session)
 			case pomoStarted:
 			//send error and how many time left
 			case pomoEnded:
-				startBreak(chat.ID, sessionChannel)
+				startBreak(session)
 			case breakStarted:
 				//send error and how many time left
 			}
 		case "/stop":
-			switch session.status {
+			switch session.state.status {
 			case pomoStarted:
-				session.timer.Stop()
-				endPomo(chat.ID, session.pomoId, sessionChannel)
+				endPomo(session)
 			case breakStarted:
-				session.timer.Stop()
-				endBreak(chat.ID, sessionChannel)
+				endBreak(session)
 			default:
-				resetState(chat.ID, sessionChannel)
+				resetState(session)
 			}
 		default:
-			sendKeyboard(chat.ID, "Unknown command", session.status)
+			sendKeyboard(chat.ID, "Unknown command", session.state.status)
 		}
+		log.Printf("Session after action %s: %+v", text, session)
 	}
 }
 
-func resetState(chatId int64, sessionChannel chan<- UserSession) {
-	sessionChannel <- UserSession{chatId: chatId, status: empty}
-	sendKeyboard(chatId, "Timer reset", empty)
+func resetState(session *UserSession) {
+	session.mutex.Lock()
+	defer session.mutex.Unlock()
+
+	session.state = State{
+		status: empty,
+	}
+	sendKeyboard(session.user.chatId, "Timer reset", empty)
 }
 
-func startPomo(chatId int64, sessionChannel chan<- UserSession) {
+func startPomo(session *UserSession) {
+	session.mutex.Lock()
+	defer session.mutex.Unlock()
+
+	chatId := session.user.chatId
+
 	sendKeyboard(chatId, "Pomodoro started", pomoStarted)
 	timeMsgId := sendMessage(chatId, formatDuration(pomoTime))
 
 	pomoId := insertPomo(chatId)
 
 	timer := time.AfterFunc(pomoTime, func() {
-		endPomo(chatId, pomoId, sessionChannel)
+		endPomo(session)
 	})
-	sessionChannel <- UserSession{
-		chatId:    chatId,
+	session.state = State{
 		status:    pomoStarted,
 		timer:     timer,
 		messageId: timeMsgId,
@@ -171,28 +184,58 @@ func startPomo(chatId int64, sessionChannel chan<- UserSession) {
 	}
 }
 
-func endPomo(chatId int64, pomoId int64, sessionChannel chan<- UserSession) {
-	markFinished(pomoId)
+func endPomo(session *UserSession) {
+	session.mutex.Lock()
+	defer session.mutex.Unlock()
 
-	sendKeyboard(chatId, "Pomodoro ended", pomoEnded)
-	sessionChannel <- UserSession{chatId: chatId, status: pomoEnded, started: time.Now()}
+	if session.state.timer != nil {
+		session.state.timer.Stop()
+	}
+
+	markFinished(session.state.pomoId)
+
+	sendKeyboard(session.user.chatId, "Pomodoro ended", pomoEnded)
+	session.state = State{
+		status:  pomoEnded,
+		started: time.Now(),
+	}
 }
 
-func startBreak(chatId int64, sessionChannel chan<- UserSession) {
+func startBreak(session *UserSession) {
+	session.mutex.Lock()
+	defer session.mutex.Unlock()
+
+	chatId := session.user.chatId
+
 	timer := time.AfterFunc(breakTime, func() {
-		endBreak(chatId, sessionChannel)
+		endBreak(session)
 	})
 	sendKeyboard(chatId, "Break started", breakStarted)
 	timeMsgId := sendMessage(chatId, formatDuration(breakTime))
-	sessionChannel <- UserSession{chatId: chatId, status: breakStarted, timer: timer, messageId: timeMsgId, started: time.Now()}
+	session.state = State{
+		status:    breakStarted,
+		timer:     timer,
+		messageId: timeMsgId,
+		started:   time.Now(),
+	}
 }
 
-func endBreak(chatId int64, sessionChannel chan<- UserSession) {
-	sendKeyboard(chatId, "Break ended", breakEnded)
-	sessionChannel <- UserSession{chatId: chatId, status: breakEnded, started: time.Now()}
+func endBreak(session *UserSession) {
+	session.mutex.Lock()
+	defer session.mutex.Unlock()
+
+	if session.state.timer != nil {
+		session.state.timer.Stop()
+	}
+
+	sendKeyboard(session.user.chatId, "Break ended", breakEnded)
+	session.state = State{
+		status:  breakEnded,
+		started: time.Now(),
+	}
 }
 
-func sendRemainingTime(s UserSession, remaining time.Duration) {
-	changed := tgbotapi.NewEditMessageText(s.chatId, s.messageId, formatDuration(remaining))
+func sendRemainingTime(s *UserSession, remaining time.Duration) {
+	changed := tgbotapi.NewEditMessageText(s.user.chatId, s.state.messageId, formatDuration(remaining))
 	bot.Send(changed)
 }

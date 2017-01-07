@@ -1,6 +1,9 @@
 package main
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 const (
 	pomoTime     = 10 * time.Second
@@ -19,10 +22,26 @@ const (
 )
 
 type UserSession struct {
-	chatId    int64
+	user  User
+	state State
+
+	mutex sync.RWMutex
+}
+
+type User struct {
+	chatId int64
+	taskId int64
+}
+
+type State struct {
 	status    PomoStatus
 	timer     *time.Timer
 	started   time.Time
 	messageId int
 	pomoId    int64
+}
+
+type Task struct {
+	id   int64
+	name string
 }
