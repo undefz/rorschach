@@ -13,7 +13,6 @@ import (
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"os/user"
-	"strings"
 )
 
 var (
@@ -95,7 +94,7 @@ func progressUpdater(sessions map[int64]*UserSession) {
 }
 
 func sendRemainingTime(s *UserSession, remaining time.Duration) {
-	changed := tgbotapi.NewEditMessageText(s.user.chatId, s.state.messageId, formatDuration(remaining))
+	changed := tgbotapi.NewEditMessageText(s.user.chatId, s.chatState.counterId, formatDuration(remaining))
 	bot.Send(changed)
 }
 
@@ -145,40 +144,54 @@ func readMessages(updates <-chan tgbotapi.Update, sessions map[int64]*UserSessio
 			sessions[chatId] = session
 		}
 		log.Printf("Session before action %s: %+v", text, session)
-		if text == "/start" {
-			switch session.state.status {
-			case empty:
-				fallthrough
-			case breakEnded:
-				startPomo(session)
-			case pomoStarted:
-			//send error and how many time left
-			case pomoEnded:
-				startBreak(session)
-			case breakStarted:
-				//send error and how many time left
-			}
-		} else if text == "/stop" {
-			switch session.state.status {
-			case pomoStarted:
-				endPomo(session)
-			case breakStarted:
-				endBreak(session)
-			default:
+		switch session.chatState.status {
+		case Idle:
+			switch text {
+			case "/start":
+				switch session.state.status {
+				case empty:
+					fallthrough
+				case breakEnded:
+					startPomo(session)
+				case pomoEnded:
+					startBreak(session)
+				}
+			case "/stop":
 				resetState(session)
+			case "/tasks add":
+				sendMessage(chatId, "Enter task name")
+				session.chatState = ChatState{status: AddingTask}
+			case "/tasks set":
+				listTasks(session)
+				sendMessage(chatId, "Enter task name")
+				session.chatState = ChatState{status: SelectingTask}
+			case "/tasks delete":
+				listTasks(session)
+				sendMessage(chatId, "Enter task name")
+				session.chatState = ChatState{status: DeletingTask}
+			default:
+				sendKeyboard(chatId, "Unknown command", session.chatState.status)
 			}
-		} else if strings.HasPrefix(text, "/tasks") {
-			parts := strings.Split(text, " ")
-			if len(parts) > 1 {
-				switch parts[1] {
-				case "list":
-					listTasks(session)
-				case "set":
-					setTask(session, parts[2])
+		case Counter:
+			switch text {
+			case "/stop":
+				switch session.state.status {
+				case pomoStarted:
+					endPomo(session)
+				case breakStarted:
+					endBreak(session)
+				default:
+					sendKeyboard(chatId, "Unknown command", session.chatState.status)
 				}
 			}
-		} else {
-			sendKeyboard(chatId, "Unknown command", session.state.status)
+		case AddingTask:
+			addTask(session, text)
+		case DeletingTask:
+			deleteTask(session, text)
+		case SelectingTask:
+			setTask(session, text)
+		default:
+			sendKeyboard(chatId, "Unknown command", session.chatState.status)
 		}
 		log.Printf("Session after action %s: %+v", text, session)
 	}
@@ -191,7 +204,8 @@ func resetState(session *UserSession) {
 	session.state = State{
 		status: empty,
 	}
-	sendKeyboard(session.user.chatId, "Timer reset", empty)
+	session.chatState = ChatState{}
+	sendKeyboard(session.user.chatId, "Timer reset", Idle)
 }
 
 func startPomo(session *UserSession) {
@@ -200,8 +214,8 @@ func startPomo(session *UserSession) {
 
 	chatId := session.user.chatId
 
-	sendKeyboard(chatId, "Pomodoro started", pomoStarted)
-	timeMsgId := sendMessage(chatId, formatDuration(pomoTime))
+	sendKeyboard(chatId, "Pomodoro started", Counter)
+	counterId := sendMessage(chatId, formatDuration(pomoTime))
 
 	pomoId := insertPomo(chatId, session.user.taskId)
 
@@ -209,11 +223,14 @@ func startPomo(session *UserSession) {
 		endPomo(session)
 	})
 	session.state = State{
-		status:    pomoStarted,
-		timer:     timer,
-		messageId: timeMsgId,
-		started:   time.Now(),
-		pomoId:    pomoId,
+		status:  pomoStarted,
+		timer:   timer,
+		started: time.Now(),
+		pomoId:  pomoId,
+	}
+	session.chatState = ChatState{
+		status:    Counter,
+		counterId: counterId,
 	}
 }
 
@@ -227,10 +244,13 @@ func endPomo(session *UserSession) {
 
 	markFinished(session.state.pomoId)
 
-	sendKeyboard(session.user.chatId, "Pomodoro ended", pomoEnded)
+	sendKeyboard(session.user.chatId, "Pomodoro ended", Idle)
 	session.state = State{
 		status:  pomoEnded,
 		started: time.Now(),
+	}
+	session.chatState = ChatState{
+		status: Idle,
 	}
 }
 
@@ -243,13 +263,16 @@ func startBreak(session *UserSession) {
 	timer := time.AfterFunc(breakTime, func() {
 		endBreak(session)
 	})
-	sendKeyboard(chatId, "Break started", breakStarted)
-	timeMsgId := sendMessage(chatId, formatDuration(breakTime))
+	sendKeyboard(chatId, "Break started", Counter)
+	counterId := sendMessage(chatId, formatDuration(breakTime))
 	session.state = State{
-		status:    breakStarted,
-		timer:     timer,
-		messageId: timeMsgId,
-		started:   time.Now(),
+		status:  breakStarted,
+		timer:   timer,
+		started: time.Now(),
+	}
+	session.chatState = ChatState{
+		status:    Counter,
+		counterId: counterId,
 	}
 }
 
@@ -261,10 +284,13 @@ func endBreak(session *UserSession) {
 		session.state.timer.Stop()
 	}
 
-	sendKeyboard(session.user.chatId, "Break ended", breakEnded)
+	sendKeyboard(session.user.chatId, "Break ended", Idle)
 	session.state = State{
 		status:  breakEnded,
 		started: time.Now(),
+	}
+	session.chatState = ChatState{
+		status: Idle,
 	}
 }
 
@@ -282,9 +308,39 @@ func listTasks(session *UserSession) error {
 	return nil
 }
 
+func addTask(session *UserSession, taskName string) error {
+	session.mutex.Lock()
+	defer session.mutex.Unlock()
+
+	_, err := insertTask(db, session.user.chatId, taskName)
+	if err != nil {
+		return err
+	}
+
+	session.chatState = ChatState{}
+	sendKeyboard(session.user.chatId, "Task inserted", Idle)
+	return nil
+}
+
+func deleteTask(session *UserSession, taskName string) error {
+	session.mutex.Lock()
+	defer session.mutex.Unlock()
+
+	err := deleteTaskByName(db, session.user.chatId, taskName)
+	if err != nil {
+		log.Printf("Error while deleting task %s - %s", taskName, err)
+		return err
+	}
+	session.chatState = ChatState{}
+	sendKeyboard(session.user.chatId, "Task "+taskName+" deleted", Idle)
+	return nil
+}
+
 func setTask(session *UserSession, taskName string) error {
 	session.mutex.Lock()
 	defer session.mutex.Unlock()
+
+	session.chatState = ChatState{}
 
 	tasks, err := loadTasks(db, session.user.chatId)
 	if err != nil {
@@ -293,8 +349,10 @@ func setTask(session *UserSession, taskName string) error {
 	for _, task := range tasks {
 		if task.Name == taskName {
 			session.user.taskId = task.Id
-			sendMessage(session.user.chatId, "Changed task to "+taskName)
+			sendKeyboard(session.user.chatId, "Changed task to "+taskName, Idle)
+			return nil
 		}
 	}
+	sendKeyboard(session.user.chatId, "Task not found!", Idle)
 	return nil
 }

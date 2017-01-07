@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/jmoiron/sqlx"
 	"log"
 )
@@ -27,7 +28,7 @@ func loadTasks(db *sqlx.DB, userId int64) ([]Task, error) {
 	return tasks, err
 }
 
-func addTask(db *sqlx.DB, userId int64, name string) (int64, error) {
+func insertTask(db *sqlx.DB, userId int64, name string) (int64, error) {
 	result, err := db.Exec("insert into tasks (user_id, name) values (?, ?)", userId, name)
 	if err != nil {
 		return 0, err
@@ -39,7 +40,17 @@ func addTask(db *sqlx.DB, userId int64, name string) (int64, error) {
 	return insertedId, nil
 }
 
-func deleteTask(db *sqlx.DB, taskId int64) error {
-	_, err := db.Exec("delete from tasks where id = ?", taskId)
+func deleteTaskByName(db *sqlx.DB, userId int64, name string) error {
+	result, err := db.Exec("delete from tasks where user_id = ? and name = ?", userId, name)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil
+	}
+	if rowsAffected != 1 {
+		return fmt.Errorf("Task %s not found", name)
+	}
 	return err
 }

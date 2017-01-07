@@ -13,23 +13,19 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%02.0fm:%02.0fs", d.Minutes(), d.Seconds())
 }
 
-func sendKeyboard(chatId int64, text string, status PomoStatus) {
+func sendKeyboard(chatId int64, text string, status ChatStatus) {
 	msg := tgbotapi.NewMessage(chatId, text)
 
 	var buttons []tgbotapi.KeyboardButton
 
 	switch status {
-	case empty:
-		fallthrough
-	case pomoEnded:
-		fallthrough
-	case breakEnded:
+	case Idle:
 		buttons = append(buttons, tgbotapi.NewKeyboardButton("/start"))
 		buttons = append(buttons, tgbotapi.NewKeyboardButton("/stop"))
-	case pomoStarted:
-		fallthrough
-	case breakStarted:
-		buttons = append(buttons, tgbotapi.NewKeyboardButton("/time"))
+		buttons = append(buttons, tgbotapi.NewKeyboardButton("/tasks add"))
+		buttons = append(buttons, tgbotapi.NewKeyboardButton("/tasks set"))
+		buttons = append(buttons, tgbotapi.NewKeyboardButton("/tasks delete"))
+	case Counter:
 		buttons = append(buttons, tgbotapi.NewKeyboardButton("/stop"))
 	}
 	btnRow := tgbotapi.NewKeyboardButtonRow(buttons...)
