@@ -16,20 +16,25 @@ func formatDuration(d time.Duration) string {
 func sendKeyboard(chatId int64, text string, status ChatStatus) {
 	msg := tgbotapi.NewMessage(chatId, text)
 
-	var buttons []tgbotapi.KeyboardButton
+	var rows [][]tgbotapi.KeyboardButton
 
 	switch status {
 	case Idle:
-		buttons = append(buttons, tgbotapi.NewKeyboardButton("/start"))
-		buttons = append(buttons, tgbotapi.NewKeyboardButton("/stop"))
-		buttons = append(buttons, tgbotapi.NewKeyboardButton("/tasks add"))
-		buttons = append(buttons, tgbotapi.NewKeyboardButton("/tasks set"))
-		buttons = append(buttons, tgbotapi.NewKeyboardButton("/tasks delete"))
+		rows = append(rows, []tgbotapi.KeyboardButton{
+			tgbotapi.NewKeyboardButton("/start"),
+			tgbotapi.NewKeyboardButton("/stop"),
+		})
+		rows = append(rows, []tgbotapi.KeyboardButton{
+			tgbotapi.NewKeyboardButton("/tasks add"),
+			tgbotapi.NewKeyboardButton("/tasks set"),
+			tgbotapi.NewKeyboardButton("/tasks delete"),
+		})
 	case Counter:
-		buttons = append(buttons, tgbotapi.NewKeyboardButton("/stop"))
+		rows = append(rows, []tgbotapi.KeyboardButton{
+			tgbotapi.NewKeyboardButton("/stop"),
+		})
 	}
-	btnRow := tgbotapi.NewKeyboardButtonRow(buttons...)
-	keyboard := tgbotapi.NewReplyKeyboard(btnRow)
+	keyboard := tgbotapi.NewReplyKeyboard(rows...)
 	keyboard.OneTimeKeyboard = true
 
 	msg.ReplyMarkup = keyboard
