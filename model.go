@@ -42,6 +42,6 @@ type State struct {
 }
 
 type Task struct {
-	id   int64
-	name string
+	Id   int64  `db:"id"`
+	Name string `db:"name"`
 }

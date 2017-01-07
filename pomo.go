@@ -6,11 +6,14 @@ import (
 
 	"gopkg.in/telegram-bot-api.v4"
 
+	"bytes"
+	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"os/user"
+	"strings"
 )
 
 var (
@@ -91,6 +94,11 @@ func progressUpdater(sessions map[int64]*UserSession) {
 	}
 }
 
+func sendRemainingTime(s *UserSession, remaining time.Duration) {
+	changed := tgbotapi.NewEditMessageText(s.user.chatId, s.state.messageId, formatDuration(remaining))
+	bot.Send(changed)
+}
+
 func pomoReminder(sessions map[int64]*UserSession) {
 	tickerPeriod := 1 * time.Second
 	for t := range time.Tick(tickerPeriod) {
@@ -120,25 +128,24 @@ func readMessages(updates <-chan tgbotapi.Update, sessions map[int64]*UserSessio
 			continue
 		}
 
-		chat := message.Chat
+		chatId := message.Chat.ID
 
 		from := message.From.UserName
 		text := message.Text
 
-		log.Printf("[%+v-%s] %s", chat.ID, from, text)
+		log.Printf("[%+v-%s] %s", chatId, from, text)
 
-		session, ok := sessions[chat.ID]
+		session, ok := sessions[chatId]
 		if !ok {
 			session = &UserSession{
 				user: User{
-					chatId: chat.ID,
+					chatId: chatId,
 				},
 			}
-			sessions[chat.ID] = session
+			sessions[chatId] = session
 		}
 		log.Printf("Session before action %s: %+v", text, session)
-		switch text {
-		case "/start":
+		if text == "/start" {
 			switch session.state.status {
 			case empty:
 				fallthrough
@@ -151,7 +158,7 @@ func readMessages(updates <-chan tgbotapi.Update, sessions map[int64]*UserSessio
 			case breakStarted:
 				//send error and how many time left
 			}
-		case "/stop":
+		} else if text == "/stop" {
 			switch session.state.status {
 			case pomoStarted:
 				endPomo(session)
@@ -160,8 +167,18 @@ func readMessages(updates <-chan tgbotapi.Update, sessions map[int64]*UserSessio
 			default:
 				resetState(session)
 			}
-		default:
-			sendKeyboard(chat.ID, "Unknown command", session.state.status)
+		} else if strings.HasPrefix(text, "/tasks") {
+			parts := strings.Split(text, " ")
+			if len(parts) > 1 {
+				switch parts[1] {
+				case "list":
+					listTasks(session)
+				case "set":
+					setTask(session, parts[2])
+				}
+			}
+		} else {
+			sendKeyboard(chatId, "Unknown command", session.state.status)
 		}
 		log.Printf("Session after action %s: %+v", text, session)
 	}
@@ -186,7 +203,7 @@ func startPomo(session *UserSession) {
 	sendKeyboard(chatId, "Pomodoro started", pomoStarted)
 	timeMsgId := sendMessage(chatId, formatDuration(pomoTime))
 
-	pomoId := insertPomo(chatId)
+	pomoId := insertPomo(chatId, session.user.taskId)
 
 	timer := time.AfterFunc(pomoTime, func() {
 		endPomo(session)
@@ -251,7 +268,33 @@ func endBreak(session *UserSession) {
 	}
 }
 
-func sendRemainingTime(s *UserSession, remaining time.Duration) {
-	changed := tgbotapi.NewEditMessageText(s.user.chatId, s.state.messageId, formatDuration(remaining))
-	bot.Send(changed)
+func listTasks(session *UserSession) error {
+	tasks, err := loadTasks(db, session.user.chatId)
+	if err != nil {
+		log.Printf("Error while loading tasks: %s\n", err)
+		return err
+	}
+	var buffer bytes.Buffer
+	for _, task := range tasks {
+		buffer.WriteString(fmt.Sprintf("%s\n", task.Name))
+	}
+	sendMessage(session.user.chatId, buffer.String())
+	return nil
+}
+
+func setTask(session *UserSession, taskName string) error {
+	session.mutex.Lock()
+	defer session.mutex.Unlock()
+
+	tasks, err := loadTasks(db, session.user.chatId)
+	if err != nil {
+		log.Printf("Error while loading tasks: %s\n", err)
+	}
+	for _, task := range tasks {
+		if task.Name == taskName {
+			session.user.taskId = task.Id
+			sendMessage(session.user.chatId, "Changed task to "+taskName)
+		}
+	}
+	return nil
 }

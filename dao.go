@@ -5,10 +5,10 @@ import (
 	"log"
 )
 
-func insertPomo(chatId int64) int64 {
+func insertPomo(chatId int64, taskId int64) int64 {
 	result := db.MustExec("insert into pomo_history(user_id, task_id, started, ended, finished) "+
-		"values (?, null, now(), null, 0)",
-		chatId)
+		"values (?, ?, now(), null, 0)",
+		chatId, taskId)
 	inserted, err := result.LastInsertId()
 	if err != nil {
 		log.Println("Could not insert new pomo")
@@ -23,7 +23,7 @@ func markFinished(pomoId int64) {
 
 func loadTasks(db *sqlx.DB, userId int64) ([]Task, error) {
 	tasks := []Task{}
-	err := db.Select(tasks, "select * from tasks where user_id = ?", userId)
+	err := db.Select(&tasks, "select id, name from tasks where user_id = ?", userId)
 	return tasks, err
 }
 
