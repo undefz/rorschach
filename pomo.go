@@ -12,7 +12,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
-	"os/user"
+	"os"
 )
 
 var (
@@ -26,12 +26,17 @@ type Config struct {
 	AllowedChatId      int64  `yaml:"AllowedChatId"`
 }
 
-func loadConfig() (Config, error) {
-	usr, err := user.Current()
-	if err != nil {
-		return Config{}, err
+// using env variables because user.Current() doesn't work with cross-compilation
+func homeDir() string {
+	if home := os.Getenv("HOME"); home != "" {
+		return home
 	}
-	file, err := ioutil.ReadFile(usr.HomeDir + "/.config/rorschach.yaml")
+	// For Windows.
+	return os.Getenv("UserProfile")
+}
+
+func loadConfig() (Config, error) {
+	file, err := ioutil.ReadFile(homeDir() + "/.config/rorschach.yaml")
 	if err != nil {
 		return Config{}, err
 	}
