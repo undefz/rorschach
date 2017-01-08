@@ -6,8 +6,6 @@ import (
 
 	"gopkg.in/telegram-bot-api.v4"
 
-	"bytes"
-	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"gopkg.in/yaml.v2"
@@ -305,11 +303,19 @@ func listTasks(session *UserSession) error {
 		log.Printf("Error while loading tasks: %s\n", err)
 		return err
 	}
-	var buffer bytes.Buffer
+
+	var rows [][]tgbotapi.KeyboardButton
 	for _, task := range tasks {
-		buffer.WriteString(fmt.Sprintf("%s\n", task.Name))
+		rows = append(rows, []tgbotapi.KeyboardButton{
+			tgbotapi.NewKeyboardButton(task.Name),
+		})
 	}
-	sendMessage(session.user.chatId, buffer.String())
+
+	msg := tgbotapi.NewMessage(session.user.chatId, "Select task")
+	keyboard := tgbotapi.NewReplyKeyboard(rows...)
+	keyboard.OneTimeKeyboard = true
+	msg.ReplyMarkup = keyboard
+	bot.Send(msg)
 	return nil
 }
 
