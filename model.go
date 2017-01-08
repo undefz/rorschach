@@ -6,9 +6,9 @@ import (
 )
 
 const (
-	pomoTime     = 10 * time.Second
-	breakTime    = 5 * time.Second
-	reminderTime = 3 * time.Second
+	pomoTime     = 25 * time.Minute
+	breakTime    = 5 * time.Minute
+	reminderTime = 1 * time.Minute
 )
 
 type PomoStatus int64

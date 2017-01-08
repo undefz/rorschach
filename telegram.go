@@ -10,7 +10,7 @@ func formatDuration(d time.Duration) string {
 	if d < 0 {
 		d = 0
 	}
-	return fmt.Sprintf("%02.0fm:%02.0fs", d.Minutes(), d.Seconds())
+	return fmt.Sprintf("%02.0fm:%02.0fs", d.Minutes(), (d % time.Minute).Seconds())
 }
 
 func sendKeyboard(chatId int64, text string, status ChatStatus) {

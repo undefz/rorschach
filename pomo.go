@@ -83,7 +83,7 @@ func main() {
 }
 
 func progressUpdater(sessions map[int64]*UserSession) {
-	for t := range time.Tick(1 * time.Second) {
+	for t := range time.Tick(10 * time.Second) {
 		for _, v := range sessions {
 			s := v.state
 			switch s.status {
